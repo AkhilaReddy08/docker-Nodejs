@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Movie Ticket Booking</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:sans-serif; background:#141414; color:#eee; padding:2rem; }
+  .container { max-width:900px; margin:0 auto; }
+  h1 { color:#e50914; margin-bottom:1rem; }
+  .movies { display:grid; grid-template-columns:repeat(auto-fill,minmax(250px,1fr)); gap:1rem; }
+  .movie-card { background:#1f1f1f; border:2px solid #333; border-radius:10px; padding:1rem; cursor:pointer; }
+  .movie-card:hover, .movie-card.selected { border-color:#e50914; }
+  .movie-card h3 { margin-bottom:0.5rem; }
+  .movie-card p { color:#aaa; font-size:0.85rem; }
+  .panel { background:#1f1f1f; border-radius:10px; padding:1.5rem; margin-top:1.5rem; display:none; }
+  .screen { background:#e50914; text-align:center; padding:0.5rem; border-radius:6px; margin-bottom:1rem; letter-spacing:4px; }
+  .seats { display:grid; grid-template-columns:repeat(4,60px); gap:0.75rem; justify-content:center; margin-bottom:1rem; }
+  .seat { height:55px; border:none; border-radius:6px; cursor:pointer; font-weight:bold; color:white; }
+  .seat.available { background:#2e7d32; }
+  .seat.selected { background:#e50914; }
+  .seat.booked { background:#333; color:#666; cursor:not-allowed; }
+  input { padding:0.7rem; border-radius:6px; border:1px solid #444; background:#0d0d0d; color:#fff; margin:0.25rem 0; width:100%; }
+  .book-btn { background:#e50914; color:#fff; border:none; padding:0.9rem; border-radius:6px; width:100%; font-weight:bold; cursor:pointer; margin-top:0.75rem; }
+  .book-btn:disabled { background:#555; cursor:not-allowed; }
+  .msg { padding:0.75rem; border-radius:6px; margin-top:0.75rem; }
+  .msg.success { background:#1b5e20; }
+  .msg.error { background:#b71c1c; }
+  .summary { margin:0.75rem 0; color:#ccc; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🎬 Movie Ticket Booking</h1>
+  <div class="movies" id="movies"></div>
+
+  <div class="panel" id="panel">
+    <h2 id="title"></h2>
+    <div class="screen">SCREEN</div>
+    <div class="seats" id="seats"></div>
+    <div class="summary" id="summary"></div>
+    <input id="name" placeholder="Your name">
+    <input id="email" type="email" placeholder="Email">
+    <button class="book-btn" id="bookBtn" onclick="book()">Confirm Booking</button>
+    <div id="msg"></div>
+  </div>
+</div>
+
+<script>
+let movies = [], current = null, picked = new Set();
+
+async function load() {
+  movies = (await (await fetch("/api/movies")).json()).movies;
+  document.getElementById("movies").innerHTML = movies.map(m => `
+    <div class="movie-card" onclick="select(${m.id})">
+      <h3>${m.title}</h3>
+      <p>${m.genre} · ${new Date(m.showtime).toLocaleString()}</p>
+      <p style="color:#4caf50;font-weight:bold">$${m.price.toFixed(2)} / seat</p>
+    </div>`).join("");
+}
+
+async function select(id) {
+  current = (await (await fetch(`/api/movies/${id}`)).json()).movie;
+  picked.clear();
+  document.getElementById("panel").style.display = "block";
+  document.getElementById("title").textContent = current.title;
+  document.getElementById("msg").innerHTML = "";
+  renderSeats();
+}
+
+function renderSeats() {
+  document.getElementById("seats").innerHTML = Object.entries(current.seatMap).map(([s, st]) => {
+    const cls = picked.has(s) ? "selected" : st;
+    return `<button class="seat ${cls}" ${st==="booked"?"disabled":""} onclick="toggle('${s}')">${s}</button>`;
+  }).join("");
+  const total = picked.size * current.price;
+  document.getElementById("summary").innerHTML =
+    `Selected: <b>${picked.size ? [...picked].join(", ") : "none"}</b> · Total: <b>$${total.toFixed(2)}</b>`;
+  document.getElementById("bookBtn").disabled = picked.size === 0;
+}
+
+function toggle(s) {
+  picked.has(s) ? picked.delete(s) : picked.add(s);
+  renderSeats();
+}
+
+async function book() {
+  const name = document.getElementById("name").value.trim();
+  const email = document.getElementById("email").value.trim();
+  const msg = document.getElementById("msg");
+  if (!name || !email) {
+    msg.className = "msg error";
+    msg.textContent = "Please fill in name and email.";
+    return;
+  }
+  const res = await fetch(`/api/movies/${current.id}/book`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ customerName: name, email, seats: [...picked] })
+  });
+  const data = await res.json();
+  if (res.ok) {
+    msg.className = "msg success";
+    msg.innerHTML = `✅ Booking ID: <b>${data.booking.bookingId}</b><br>Seats: ${data.booking.seats.join(", ")} · Total: $${data.booking.totalPrice.toFixed(2)}`;
+    picked.clear();
+    select(current.id);
+  } else {
+    msg.className = "msg error";
+    msg.textContent = "❌ " + data.error;
+  }
+}
+
+load();
+</script>
+</body>
+</html>
